@@ -1,95 +1,68 @@
 # encoding:utf-8
-'''
-将问题生成train.npz
-'''
-
 import numpy as np
-import tqdm
-import tensorflow as tf
-from typing import Dict
+import pandas as pd
+from keras.preprocessing.sequence import pad_sequences
+from keras.utils import to_categorical
+import os
+from os import path
+from sklearn.model_selection import train_test_split
 
-def get_train_val(input_file, output_file, char_maxlen = 4000, word_maxlen = 1500):
-    with open(input_file) as f:
-        lines = f.readlines()
-
-    char2id = np.load('../input/char.npz')['word2id'].item()
-    word2id = np.load('../input/word.npz')['word2id'].item()
-    charset = set(char2id.keys())
-
-
-def main(question_file, outfile, b_=50, c_=30, d_=250, e_=120):
-    with open(question_file) as f:
-        lines = f.readlines()
-
-    results = [0 for _ in range(len(lines))]
-
-    char2id: Dict = np.load('/mnt/7/zhihu/ieee_zhihu_cup/data/char_embedding.npz')['word2id'].item()
-    word2id: Dict = np.load('/mnt/7/zhihu/ieee_zhihu_cup/data/word_embedding.npz')['word2id'].item()
-
-    char_keys = set(char2id.keys())
-    word_keys = set(word2id.keys())
-
-    # import ipdb;ipdb.set_trace()
-    def process(line):
-        a, b, c, d, e = line.replace('\n', '').split('\t')
-        b, c, d, e = [_.split(',') for _ in [b, c, d, e]]
-        b, c, d, e = [[int(word[1:]) if word != '' else -1 for word in sen] for sen in [b, c, d, e]]
-        return b, c, d, e, a
-
-    for ii, line in tqdm.tqdm(enumerate(lines)):
-        results[ii] = process(line)
-
-    del lines
-
-    pad_sequence = tf.contrib.keras.preprocessing.sequence.pad_sequences
-
-    bs = [[char2id['c' + str(_) if 'c' + str(_) in char_keys else '</s>'] for _ in line[0]] for line in results]
-
-    b_len = np.array([len(_) for _ in bs])
-    bs_packed = pad_sequence(bs, maxlen=b_, padding='pre', truncating='pre', value=0)
-    print('a')
-    del bs
-
-    cs = [[word2id['w' + str(_) if 'w' + str(_) in word_keys else '</s>'] for _ in line[1]] for line in results]
-    c_len = np.array([len(_) for _ in cs])
-    cs_packed = pad_sequence(cs, maxlen=c_, padding='pre', truncating='pre', value=0)
-    print('b')
-    del cs
-
-    ds = [[char2id['c' + str(_) if 'c' + str(_) in char_keys else '</s>'] for _ in line[2]] for line in results]
-    d_len = np.array([len(_) for _ in ds])
-    ds_packed = pad_sequence(ds, maxlen=d_, padding='pre', truncating='pre', value=0)
-    print('c')
-    del ds
-
-    es = [[word2id['w' + str(_) if 'w' + str(_) in word_keys else '</s>'] for _ in line[3]] for line in results]
-    e_len = np.array([len(_) for _ in es])
-    es_packed = pad_sequence(es, maxlen=e_, padding='pre', truncating='pre', value=0)
-    print('d')
-    del es
-
-    qids = [_[4] for _ in results]
-    index2qid = {ii: jj for ii, jj in enumerate(qids)}
-
-    np.savez_compressed(outfile,
-                        title_char=bs_packed,
-                        title_word=cs_packed, \
-                        content_char=ds_packed,
-                        content_word=es_packed,
-                        title_char_len=b_len,
-                        title_word_len=c_len,
-                        content_char_len=d_len,
-                        content_word_len=e_len,
-                        index2qid=index2qid
-                        )
+char2id = np.load('../input/char.vec.npz')['wordid'][()]
+word2id = np.load('../input/word.vec.npz')['wordid'][()]
+save_path = "../input/pt"
+train_path = "../input/pt/train"
+validation_path = "../input/pt/validation"
+test_path = "../input/pt/validation"
+for p in [save_path, train_path, validation_path, test_path]:
+    if not path.exists(p):
+        os.makedirs(p, exist_ok=True)
 
 
-# 标题平均有 22.335409689506584 字 ->50
-# 标题平均有 12.90899899898899 词 ->35
-# 描述平均有 117.67666210994987 字 ->250
-# 描述平均有 58.563685338852 词 ->120
+def char_col_to_id_list(df):
+    articles = df['article'].apply(
+        lambda x: [char2id.get(s, 1) for s in x.split()])
+    padded_char_list = pad_sequences(articles.values, maxlen=4000,
+                                     padding='post',
+                                     truncating='post')
+    return padded_char_list
 
+
+def word_col_to_id_list(df):
+    words = df['article'].apply(
+        lambda x: [word2id.get(s, 1) for s in x.split()])
+    padded_char_list = pad_sequences(words.values, maxlen=900,
+                                     padding='post',
+                                     truncating='post')
+    return padded_char_list
+
+
+def get_train_val():
+    print("pressing training data")
+    train = pd.read_csv('../input/train_set.csv')
+    train_char_arr = char_col_to_id_list(train)
+    train_word_arr = word_col_to_id_list(train)
+    train_y = to_categorical(train['class'].values - 1, num_classes=19)
+    char_tra, char_val, word_tra, word_val, y_tra, y_val = train_test_split(
+        train_char_arr,
+        train_word_arr,
+        train_y,
+        train_size=0.92,
+        random_state=233)
+    del train, train_char_arr, train_word_arr, train_y
+    print("pressinng testing data")
+    test = pd.read_csv('../input/test_set.csv')
+    char_test = char_col_to_id_list(test)
+    word_test = word_col_to_id_list(test)
+    del test
+    np.savez_compressed("../input/train_validation_test_dataset.npz",
+                        char_tra=char_tra,
+                        char_val=char_val,
+                        char_test=char_test,
+                        word_tra=word_tra,
+                        word_val=word_val,
+                        word_test=word_test,
+                        y_tra=y_tra,
+                        y_val=y_val)
+    print("file saved at input/train_validation_test_dataset.npz")
 if __name__ == '__main__':
-    import fire
-
-    fire.Fire()
+    get_train_val()
